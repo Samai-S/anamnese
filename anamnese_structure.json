@@ -1,0 +1,64 @@
+{
+  "paciente": {
+    "identificacao": {
+      "nomeCompleto": "",
+      "sexo": "",
+      "cor": "",
+      "dataNascimento": "",
+      "cpf": "",
+      "telefone": "",
+      "email": "",
+      "endereco": "",
+      "profissao": "",
+      "estadoCivil": "."
+    },
+    "queixaPrincipal": {
+      "queixa motivdora da consulta": "."
+    },
+    "historiaDoencaAtual": {
+      "localização": "",
+      "intensidade": "",
+      "características": "",
+      "cronologia": "",
+      "fatores associados": "",
+      "fatores desencadeantes": "",
+      "fatores de melhora": "",
+      "fatores de piora": "",
+      "observacoes": ""
+    },
+    "historiaPessoais": {
+      "doencasPreexistentes": [
+        "",
+        ""
+      ],
+      "cirurgias": [
+        "",
+        ""
+      ],
+      "hospitalizacoes": [
+        "",
+        ""
+      ],
+      "alergias": [
+        "",
+        ""
+      ],
+      "medicamentos em uso": [
+        "",
+        ""
+      ],
+      "tabagismo": "",
+      "etilismo": "",
+      "usoDrogas": "",
+      "hábitos": [
+        ""
+      ]
+    },
+    "historiaFamiliar": {
+      "antecedentes": "",
+      "observacoes": ""
+    },
+    "observacoes": ""
+  },
+  "sugestoes de medicamento/tratamentos":""
+}
