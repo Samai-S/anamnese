@@ -1,17 +1,5 @@
 {
   "paciente": {
-    "identificacao": {
-      "nomeCompleto": "",
-      "sexo": "",
-      "cor": "",
-      "dataNascimento": "",
-      "cpf": "",
-      "telefone": "",
-      "email": "",
-      "endereco": "",
-      "profissao": "",
-      "estadoCivil": "."
-    },
     "queixaPrincipal": {
       "queixa motivdora da consulta": "."
     },
