@@ -117,7 +117,8 @@ def process_audio_data(status_label, start_button, stop_button): # Added buttons
     try:
         text = ""
         # text = recognize_google(r, combined_audio)
-        text = audio_recognize.recognize_vosk(r, combined_audio) # Pass the combined_audio directly
+        #nn funciona
+        # text = audio_recognize.recognize_vosk(r, combined_audio) # Pass the combined_audio directly
         #text = audio_recognize.recognize_whisper_from_memory(combined_audio)
 
         if text:
