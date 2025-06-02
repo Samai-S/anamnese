@@ -116,10 +116,9 @@ def process_audio_data(status_label, start_button, stop_button): # Added buttons
 
     try:
         text = ""
-        # --- MAKE SURE THE CORRECT RECOGNIZER IS CALLED ---
         # text = recognize_google(r, combined_audio)
-        # text = audio_recognize.recognize_vosk(r, combined_audio) # Pass the combined_audio directly
-        text = audio_recognize.recognize_whisper_from_memory(combined_audio)
+        text = audio_recognize.recognize_vosk(r, combined_audio) # Pass the combined_audio directly
+        #text = audio_recognize.recognize_whisper_from_memory(combined_audio)
 
         if text:
             print("Texto reconhecido:", text)
