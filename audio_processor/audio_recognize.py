@@ -33,7 +33,7 @@ def recognize_google(recognizer_instance, audio_data):
 
 def recognize_whisper_from_memory(model_instance, audio_data_sr): 
     print("\nrecognize_whisper accessed")
-    if model_instance:
+    if model_instance is None:
         return "Whisper model not available."
     try:
         print("Whisper: Transcribing...")
