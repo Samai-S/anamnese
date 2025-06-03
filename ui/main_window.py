@@ -1,38 +1,39 @@
 import tkinter as tk
 from tkinter import messagebox
-from audio_processor import audio_handler  # Certifique-se de que esse caminho está correto
-from ui import button_label  # Certifique-se de que button_label.py está dentro da pasta ui/
+from audio_processor import audio_handler  
+from ui import button_label 
+
+from tkinter.scrolledtext import ScrolledText  # Adicione isso ao topo
 
 def create_main_window():
-    # Tornando variáveis globais caso precise acessar de fora (opcional)
-    global root, status_label, start_button, stop_button
+    global root, status_label, start_button, stop_button, transcript_text_area
 
-    # Criação da janela principal
     root = tk.Tk()
     root.title("Gravador de Áudio para Texto")
-    root.geometry("300x150")
+    root.geometry("400x300")
 
-    # Label de status
     status_label = button_label.create_status_label(root)
     status_label.pack(pady=5)
 
-    # Botão Iniciar Gravação
     start_button = button_label.create_start_button(
         root,
-        lambda: audio_handler.start_recording(root, status_label, start_button, stop_button)
+        lambda: audio_handler.start_recording(root, status_label, start_button, stop_button, transcript_text_area)
     )
     start_button.pack(pady=10)
 
-    # Botão Parar Gravação
     stop_button = button_label.create_stop_button(
         root,
-        lambda: audio_handler.stop_recording_func(root, status_label, start_button, stop_button)
+        lambda: audio_handler.stop_recording_func(root, status_label, start_button, stop_button, transcript_text_area)
     )
     stop_button.pack(pady=10)
 
-    # Tratamento do fechamento da janela
+    # Área de transcrição
+    transcript_text_area = ScrolledText(root, height=8, width=45, wrap="word", state="disabled")
+    transcript_text_area.pack(pady=10)
+
     def on_closing():
-        audio_handler.on_closing(root)
+        audio_handler.on_closing(root, transcript_text_area)
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
+

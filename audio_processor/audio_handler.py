@@ -1,168 +1,212 @@
+# audio_processor/audio_handler.py
 import speech_recognition as sr
-from tkinter import messagebox
-from threading import Thread
-# from file_handler import output_text # Assuming you'll uncomment later
-# from audio_processor import audio_recognize # Using directly from global space now
-from audio_processor import audio_recognize # Import directly
+from tkinter import messagebox, DISABLED, NORMAL
+import tkinter as tk 
+import threading
+from threading import Lock, Thread
+import queue 
+
+from .multi_recognizer import MultiRecognizer 
 
 r = sr.Recognizer()
-# --- MODIFICATION 1: Attempt to set microphone sample rate ---
-TARGET_SAMPLE_RATE = 16000 # For Vosk model
-try:
-    mic = sr.Microphone(sample_rate=TARGET_SAMPLE_RATE)
-    print(f"Microphone initialized with sample_rate={mic.SAMPLE_RATE}Hz (target: {TARGET_SAMPLE_RATE}Hz)")
-    if mic.SAMPLE_RATE != TARGET_SAMPLE_RATE:
-        print(f"WARNING: Microphone did not accept target sample rate. Actual rate: {mic.SAMPLE_RATE}Hz. "
-              "Recognition quality with Vosk may be affected unless resampling is performed.")
-except Exception as e:
-    print(f"Could not initialize microphone with target sample rate {TARGET_SAMPLE_RATE}Hz. Using default. Error: {e}")
-    mic = sr.Microphone()
-    print(f"Microphone initialized with default sample_rate={mic.SAMPLE_RATE}Hz")
+TARGET_SAMPLE_RATE = 16000
+mic = None
+multi_recognizer_instance = MultiRecognizer(r) 
 
-# --- END MODIFICATION 1 ---
-
-stop_listening = None
+stop_listening_func_ref = None 
 is_recording = False
-audio_chunks = []
-processing_thread = None
+processing_threads = [] 
+threads_lock = Lock() 
 
-def audio_callback(recognizer, audio):
-    global audio_chunks
-    if is_recording:
-        #print("Chunk recebido...")
-        audio_chunks.append(audio.get_raw_data())
+ui_update_queue = queue.Queue()
 
-def start_recording(root, status_label, start_button, stop_button):
-    global stop_listening, is_recording, audio_chunks
-    if is_recording:
-        print("Já está gravando!")
+_root_ref = None
+_transcript_text_ref = None
+_status_label_ref = None
+
+
+def init_microphone():
+    global mic
+    try:
+        mic = sr.Microphone(sample_rate=TARGET_SAMPLE_RATE)
+        print(f"Microphone: SR={mic.SAMPLE_RATE}Hz (Target: {TARGET_SAMPLE_RATE}Hz)")
+        if mic.SAMPLE_RATE != TARGET_SAMPLE_RATE:
+            print("Warning: Mic SR mismatch. Quality might be affected.")
+    except Exception as e:
+        print(f"Error initializing mic with target SR: {e}. Using default.")
+        try:
+            mic = sr.Microphone()
+            print(f"Microphone: Default SR={mic.SAMPLE_RATE}Hz")
+        except Exception as e_default:
+            print(f"Fatal: Could not initialize any microphone: {e_default}")
+            mic = None
+            messagebox.showerror("Erro de Microfone", "Não foi possível encontrar um microfone.")
+            return False
+    return True
+
+
+def update_transcript_on_ui(engine_name, text):
+    """Appends text to the transcript area in a thread-safe manner via queue."""
+    if _transcript_text_ref and text: 
+        _transcript_text_ref.config(state=NORMAL)
+        _transcript_text_ref.insert(tk.END, f"[{engine_name.upper()}]: {text}\n")
+        _transcript_text_ref.see(tk.END) 
+        _transcript_text_ref.config(state=DISABLED)
+
+
+def process_ui_updates():
+    """Checks the queue for UI updates and processes them in the main thread."""
+    global _root_ref
+    try:
+        while True: 
+            engine_name, text_segment = ui_update_queue.get_nowait()
+            update_transcript_on_ui(engine_name, text_segment)
+            ui_update_queue.task_done()
+    except queue.Empty:
+        pass 
+    finally:
+        if _root_ref and _root_ref.winfo_exists(): # Ensure root window still exists
+            _root_ref.after(100, process_ui_updates) # Check again after 100ms
+
+
+def transcribe_audio_phrase_thread(audio_data):
+    """
+    Worker thread function to transcribe a single audio phrase.
+    This is called for each phrase detected by `listen_in_background`.
+    """
+    global multi_recognizer_instance
+    print(f"Thread {threading.current_thread().name}: Transcribing phrase (size: {len(audio_data.frame_data)} bytes)")
+    try:
+
+        results = multi_recognizer_instance.transcribe_all(audio_data)
+        for engine, text in results.items():
+            if text: 
+                ui_update_queue.put((engine, text))
+    except Exception as e:
+        print(f"Error in transcription thread: {e}")
+        ui_update_queue.put(("ERROR", f"Erro na transcrição da frase: {e}"))
+    finally:
+        with threads_lock:
+            if threading.current_thread() in processing_threads:
+                processing_threads.remove(threading.current_thread())
+       
+
+def audio_data_callback(recognizer, audio_phrase_data): 
+    """
+    Callback from listen_in_background. Called when a phrase is detected.
+    """
+    global is_recording
+    if not is_recording:
         return
 
-    audio_chunks = []
-    status_label.config(text="Ajustando para ruído ambiente...")
+    print("\nchunk recieved")
+    thread = Thread(target=transcribe_audio_phrase_thread, args=(audio_phrase_data,), daemon=True)
+    with threads_lock:
+        processing_threads.append(thread)
+    thread.start()
+
+
+def start_recording(root, status_label, start_button, stop_button, transcript_text_area):
+    global stop_listening_func_ref, is_recording, mic
+    global _root_ref, _transcript_text_ref, _status_label_ref
+
+    if is_recording:
+        print("Already recording!")
+        return
+
+    if mic is None: 
+        if not init_microphone(): 
+             messagebox.showerror("Erro de Microfone", "Microfone não está disponível.")
+             return
+
+
+
+    _root_ref = root
+    _transcript_text_ref = transcript_text_area
+    _status_label_ref = status_label
+
+    _transcript_text_ref.config(state=NORMAL)
+    _transcript_text_ref.delete(1.0, tk.END)
+    _transcript_text_ref.insert(tk.END, "Iniciando gravação...\n")
+    _transcript_text_ref.config(state=DISABLED)
+
+    status_label.config(text="Ajustando ruído ambiente...")
     root.update_idletasks()
 
     try:
         with mic as source:
-            print(f"Adjusting for ambient noise. Mic SR: {source.SAMPLE_RATE}, SW: {source.SAMPLE_WIDTH}")
-            r.adjust_for_ambient_noise(source, duration=0.7)
-        stop_listening = r.listen_in_background(mic, audio_callback, phrase_time_limit=None) # phrase_time_limit=None to ensure continuous stream if needed
+            r.adjust_for_ambient_noise(source, duration=0.5)
+        
+        r.pause_threshold = 0.8  
+
+        stop_listening_func_ref = r.listen_in_background(mic, audio_data_callback, phrase_time_limit=4)
+        
         is_recording = True
-        print("Gravando...")
+        print("Recording started...")
         status_label.config(text="Gravando... Fale agora!")
         start_button.config(state="disabled", bg="gray")
         stop_button.config(state="normal", bg="red")
-    except Exception as e:
-        messagebox.showerror("Erro de Microfone", f"Não foi possível iniciar a gravação:\n{e}")
-        status_label.config(text="Erro ao iniciar. Verifique o microfone.")
+        
+        process_ui_updates()
 
-def stop_recording_func(root, status_label, start_button, stop_button):
-    global stop_listening, is_recording, processing_thread
+    except Exception as e:
+        messagebox.showerror("Erro de Gravação", f"Não foi possível iniciar a gravação:\n{e}")
+        status_label.config(text="Erro ao iniciar gravação.")
+        is_recording = False
+
+
+def stop_recording_func(root, status_label, start_button, stop_button, transcript_text_area):
+    global stop_listening_func_ref, is_recording
+
     if not is_recording:
-        print("Não está gravando.")
+        print("Not recording.")
         return
 
-    print("Parando gravação...")
+    print("Stopping recording...")
     status_label.config(text="Parando gravação...")
     root.update_idletasks()
 
-    if stop_listening:
-        stop_listening(wait_for_stop=False) # Set wait_for_stop to False is good for responsiveness
-        stop_listening = None
+    if stop_listening_func_ref:
+        stop_listening_func_ref(wait_for_stop=True) 
+        stop_listening_func_ref = None
+    
+    is_recording = False
 
-    is_recording = False # Set this immediately
+
+    status_label.config(text="Gravação parada. Pronto.")
     start_button.config(state="normal", bg="green")
-    stop_button.config(state="disabled", bg="gray") # Disable stop until processing finishes? or re-enable after process
+    stop_button.config(state="disabled", bg="gray")
+    
+    if _transcript_text_ref:
+         _transcript_text_ref.config(state=NORMAL)
+         _transcript_text_ref.insert(tk.END, "\n--- Gravação finalizada ---\n")
+         _transcript_text_ref.config(state=DISABLED)
 
-    if audio_chunks:
-        status_label.config(text="Processando áudio...")
-        # Pass buttons to re-enable them after processing in process_audio_data
-        processing_thread = Thread(target=lambda: process_audio_data(status_label, start_button, stop_button))
-        processing_thread.start()
-    else:
-        print("Nenhum áudio gravado.")
-        status_label.config(text="Nenhum áudio gravado.")
-        # Re-enable start button if no audio
-        start_button.config(state="normal", bg="green")
 
-def process_audio_data(status_label, start_button, stop_button): # Added buttons for state management
-    global audio_chunks, r # r is needed by recognizers
-    print("Iniciando reconhecimento...")
+def on_closing(root, transcript_text_area=None): 
+    global is_recording, stop_listening_func_ref, _root_ref
 
-    try:
-        # Use the actual sample rate and width from the microphone object
-        # These were set (or defaulted) when 'mic' was initialized
-        actual_sample_rate = mic.SAMPLE_RATE
-        actual_sample_width = mic.SAMPLE_WIDTH
-        print(f"Processing audio with: SR={actual_sample_rate}Hz, SW={actual_sample_width}")
+    print("Closing application...")
+    _root_ref = None 
 
-    except AttributeError:
-        print("Warning: mic.SAMPLE_RATE or mic.SAMPLE_WIDTH not found. Using defaults (44100, 2). This might be problematic.")
-        actual_sample_rate = 44100  # Fallback, but less ideal
-        actual_sample_width = 2    # Fallback (2 bytes = 16-bit)
+    if is_recording:
+        print("Stopping active recording...")
+        if stop_listening_func_ref:
+            stop_listening_func_ref(wait_for_stop=False) 
+            stop_listening_func_ref = None
+        is_recording = False
 
-    if not audio_chunks:
-        print("Sem áudio para processar.")
-        status_label.config(text="Erro: Sem dados de áudio.")
-        start_button.config(state="normal", bg="green") # Re-enable start button
-        stop_button.config(state="disabled", bg="gray")
-        return
 
-    combined_data = b"".join(audio_chunks)
-    audio_chunks.clear() # Clear chunks *before* potentially long processing
+    print("Waiting for any final processing...")
+    threads_to_join_on_close = []
+    with threads_lock:
+        threads_to_join_on_close = list(processing_threads)
 
-    # Create AudioData with the *actual* captured sample rate and width
-    combined_audio = sr.AudioData(combined_data, actual_sample_rate, actual_sample_width)
-
-    try:
-        text = ""
-        # text = recognize_google(r, combined_audio)
-        #nn funciona
-        # text = audio_recognize.recognize_vosk(r, combined_audio) # Pass the combined_audio directly
-        #text = audio_recognize.recognize_whisper_from_memory(combined_audio)
-
-        if text:
-            print("Texto reconhecido:", text)
-            # output_text(text) # Assuming you'll uncomment later
-            status_label.config(text=f"Pronto. (Texto salvo)") # Indicate success
-            messagebox.showinfo("Transcrição", f"Texto reconhecido:\n\n{text}")
-        else:
-            print("Texto reconhecido está VAZIO.")
-            status_label.config(text="Não foi possível entender o áudio (resultado vazio).")
-
-    except sr.UnknownValueError:
-        print("Vosk/Google não pôde entender o áudio.")
-        status_label.config(text="Não foi possível entender o áudio.")
-        messagebox.showwarning("Transcrição Falhou", "Não foi possível entender o áudio.")
-    except sr.RequestError as e:
-        print(f"Erro de API/Rede: {e}")
-        messagebox.showerror("Erro de Rede", f"Erro ao conectar ao serviço de reconhecimento:\n{e}")
-        status_label.config(text="Erro de rede no reconhecimento.")
-    except Exception as e:
-        print(f"Erro durante o reconhecimento: {e}")
-        status_label.config(text=f"Erro no processamento: {e}")
-        messagebox.showerror("Erro", f"Ocorreu um erro durante o processamento:\n{e}")
-    finally:
-        # audio_chunks.clear() # Moved clear earlier
-        # Re-enable buttons regardless of outcome
-        start_button.config(state="normal", bg="green")
-        stop_button.config(state="disabled", bg="gray")
-        status_label.config(text="Pronto para gravar") # Reset status
-
-def on_closing(root):
-    global stop_listening, is_recording, processing_thread
-    print("Fechando aplicação...")
-    if is_recording and stop_listening:
-        print("Parando gravação em andamento...")
-        stop_listening(wait_for_stop=False)
-        is_recording = False # Ensure this is set
-
-    if processing_thread and processing_thread.is_alive():
-        print("Aguardando processamento de áudio terminar...")
-        # status_label.config(text="Finalizando...") # status_label might not exist if root is gone
-        processing_thread.join(timeout=5.0) # Wait for a bit
-        if processing_thread.is_alive():
-            print("Processamento ainda em execução após timeout. Forçando saída.")
-
-    print("Destruindo janela principal.")
+    for thread in threads_to_join_on_close:
+        thread.join(timeout=1.0) 
+    
+    print("Destroying main window.")
     root.destroy()
+
+if not init_microphone():
+    print("Failed to initialize microphone at module load. Recording will likely fail.")
