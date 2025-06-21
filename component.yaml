@@ -1,0 +1,5 @@
+name: anamnese-api
+componentType: service
+implementation:
+  type: openapi
+  file: openapi.yaml

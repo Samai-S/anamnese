@@ -1,0 +1,11 @@
+openapi: 3.0.0
+info:
+  title: Anamnese API
+  version: 1.0.0
+paths:
+  /anamnese:
+    get:
+      summary: Retorna uma anamnese simulada
+      responses:
+        '200':
+          description: Sucesso
